@@ -1,0 +1,197 @@
+#!/usr/bin/env python2
+'''
+A helperscript to create home directories on auto.home / trusted IPA / AD
+constellations
+'''
+
+
+import argparse
+import sys
+import os
+import os.path
+import shutil
+import pwd
+import ConfigParser
+import StringIO
+
+try:
+    import ldap
+except:
+    raise Exception('Please install python-ldap')
+
+try:
+    import sid
+except:
+    raise Exception('Please install python-sid')
+
+VERBOSE = False
+DEFAULTCONF = '''
+[main]
+homeroot=/tmp/mkhomedirs-test
+skel=/etc/skel
+checkmounted=False
+[ipa]
+uri=ldaps://ipa.example.com
+base=dc=linux,dc=example,dc=com
+binddn=
+bindpass=
+[ad]
+domain=example.com
+host=ad.example.com
+base=DC=example,DC=com
+binddn=
+bindpass=
+'''
+
+def verbose(message):
+    '''Print out messages in verbose mode'''
+    global VERBOSE
+    if VERBOSE:
+        print ':>', message
+
+def isMounted(mnt):
+    '''Check if directory is mounted'''
+    verbose('checking if ' + mnt + ' is mounted')
+    mounts = open('/proc/mounts').read().split('\n')
+    for line in mounts:
+        if len(line.split()) > 2:
+            if mnt == line.split()[1]:
+                return True
+    return False
+
+def mkhomedir(user, addomain, homeroot, skel):
+    '''Create home directory for user by skeleton'''
+    user = user.lower()
+    verbose('getting user ' + user + '@' + addomain)
+    try:
+        u = pwd.getpwnam(user + '@' + addomain)
+    except KeyError:
+        print 'User not found: ' + user + '@' + addomain
+        return
+    uid = u[2]
+    gid = u[3]
+    if os.path.isdir(os.path.join(homeroot, addomain, user)):
+        verbose('Skipping ' + os.path.join(homeroot, addomain, user))
+        return
+
+    verbose("Creating (%s:%s) %s" % (str(uid), str(gid), \
+                                     os.path.join(homeroot, \
+                                     addomain, user)))
+    shutil.copytree(skel, os.path.join(homeroot, addomain, user), True)
+    for root, dirs, files in os.walk(os.path.join(homeroot, addomain, user)):
+        os.chown(root, int(uid), int(gid))
+        for dir in dirs:
+            os.chown(os.path.join(root, dir), int(uid), int(gid))
+        for file in files:
+            os.chown(os.path.join(root, file), int(uid), int(gid))
+
+def getIPAGroups(uri, base, binddn, bindpass):
+    '''Get valid groups from ipa server'''
+    l = ldap.initialize(uri)
+    verbose('binding to ' + uri + ' as' + binddn)
+    l.simple_bind_s(binddn, bindpass)
+    res = l.search_s(base, ldap.SCOPE_SUBTREE, '(objectClass=ipaexternalgroup)', \
+                     ['ipaExternalMember'])
+    verbose('searching ' + base + ' (objectClass=ipaexternalgroup) ipaExternalMember')
+    ret = []
+    for dn, attrs in res:
+        ret.append(sid.sid(attrs['ipaExternalMember'][0]))
+    verbose('found ' + str(ret))
+    return ret
+
+def getADGroupDNs(ipagroups, adhost, base, binddn, bindpass):
+    '''Map ipa groups to AD groups'''
+    filt = '(&(objectClass=group)(|'
+    for g in ipagroups:
+        filt += '(objectSid=' + str(g) + ')'
+    filt += '))'
+    l = ldap.open(adhost)
+    verbose('binding to ' + adhost + ' as ' + binddn)
+    l.simple_bind_s(binddn, bindpass)
+    verbose('searching ' + base + ' ' + filt + ' dn')
+    res = l.search_s(base, ldap.SCOPE_SUBTREE, filt, ['dn'])
+    ret = []
+    for dn, attrs in res:
+        ret.append(dn)
+    verbose('found ' + str(ret))
+    return ret
+
+def getADUsers(adgroups, adhost, base, binddn, bindpass):
+    '''Get users from mapped AD groups'''
+    users = []
+    l = ldap.open(adhost)
+    verbose('binding to ' + adhost + ' as ' + binddn)
+    l.simple_bind_s(binddn, bindpass)
+    filt = '(&(objectClass=user)(|'
+    for g in adgroups:
+        filt += '(memberOf=' + str(g) + ')'
+    filt += '))'
+    verbose('searching ' + base + ' ' + filt + ' dn')
+    res = l.search_s(base, ldap.SCOPE_SUBTREE, filt, ['sAMAccountName'])
+    for dn, attrs in res:
+        if 'sAMAccountName' in attrs:
+            users.append(attrs['sAMAccountName'][0])
+    verbose('found ' + str(users))
+    return users
+
+def main():
+    global VERBOSE
+    parser = argparse.ArgumentParser(description='Create homedirs')
+    parser.add_argument('-v', help='Turn on verbosity', action='store_true')
+    parser.add_argument('-c', dest='config', help='config file', \
+                        default='/etc/mkhomedirs-ipa-ad')
+    args = parser.parse_args()
+
+    if args.v:
+        VERBOSE = True
+        verbose('Enabled verbosity')
+
+    if os.geteuid() != 0:
+        raise Exception('must be run as user root')
+
+    verbose('reading config defaults and file ' + args.config)
+    config = ConfigParser.SafeConfigParser()
+    config.readfp( StringIO.StringIO(DEFAULTCONF) )
+    config.read( os.path.expanduser(args.config) )
+
+    ipauri = config.get('ipa', 'uri')
+    ipabase = config.get('ipa', 'base')
+    ipabinddn = config.get('ipa', 'binddn')
+    ipabindpass = config.get('ipa', 'bindpass')
+
+    adhost = config.get('ad', 'host')
+    addomain = config.get('ad', 'domain')
+    adbase = config.get('ad', 'base')
+    adbinddn = config.get('ad', 'binddn')
+    adbindpass = config.get('ad', 'bindpass')
+
+    homeroot = config.get('main', 'homeroot')
+    skel = config.get('main', 'skel')
+    checkmounted = config.get('main', 'checkmounted')
+
+    if checkmounted == 'True' or checkmounted == 'true':
+        if not isMounted(homeroot):
+            raise Exception(homeroot + ' is not mounted')
+
+    ipagroups = getIPAGroups(ipauri, ipabase, ipabinddn, ipabindpass)
+    adgroups = getADGroupDNs(ipagroups, adhost, adbase, adbinddn, adbindpass)
+    adusers = getADUsers(adgroups, adhost, adbase, adbinddn, adbindpass)
+    adusers = list(set(adusers)) # Remove duplicates
+
+    p = os.path.sep
+    h = homeroot.split(os.path.sep)
+    h.remove('')
+    for pi in h:
+        p = os.path.join(p, pi)
+        if not os.access(p, os.F_OK):
+            verbose('creating ' + p)
+            os.mkdir(p)
+
+    for u in adusers:
+        mkhomedir(u, addomain, homeroot, skel)
+
+
+if __name__=='__main__':
+    main()
+
+

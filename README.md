@@ -5,6 +5,7 @@ Helper script to create home directories from FreeIPA trusted to Active Director
 ## Requirements
 
 * [python-sid](https://github.com/sspreitzer/python-sid)
+* [python-ldap](http://www.python-ldap.org/)
 
 ## Changelog
 * 0.1

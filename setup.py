@@ -1,3 +1,4 @@
+'''
 The MIT License (MIT)
 
 Copyright (c) 2015 Sascha Spreitzer, Red Hat
@@ -19,4 +20,27 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+'''
 
+
+from setuptools import setup
+
+
+setup(
+    name = "mkhomedirs-ipa-ad",
+    version = "0.1",
+    author = "Sascha Spreitzer",
+    author_email = "sspreitz@redhat.com",
+    description = ("Helper script to create home directories from FreeIPA trusted to Active Directory"),
+    license = "MIT",
+    keywords = "ipa freeipa ad auto.home mkhomedir",
+    url = "Helper script to create home directories from FreeIPA trusted to Active Directory",
+    package_dir = {'': 'src'},
+    install_requires=['sid'],
+    scripts = ['src/mkhomedirs-ipa-ad'],
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "License :: OSI Approved :: MIT License",
+        "Topic :: System :: Systems Administration",
+    ],
+)

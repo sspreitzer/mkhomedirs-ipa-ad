@@ -34,7 +34,7 @@ setup(
     description = ("Helper script to create home directories from FreeIPA trusted to Active Directory"),
     license = "MIT",
     keywords = "ipa freeipa ad auto.home mkhomedir",
-    url = "Helper script to create home directories from FreeIPA trusted to Active Directory",
+    url = "https://github.com/sspreitzer/mkhomedirs-ipa-ad",
     package_dir = {'': 'src'},
     install_requires=['sid', 'python-ldap'],
     scripts = ['src/mkhomedirs-ipa-ad'],
